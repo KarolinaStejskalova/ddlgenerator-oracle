@@ -1,5 +1,5 @@
 import argparse
-import cx_Oracle
+import oracledb
 import os
 import sys
 import re
@@ -10,6 +10,10 @@ class DDLGenerator(object):
     # Class variables
     # mapping of object types that show up in the user_objects view to the types used
     # in dbms_metadata.get_ddl() function
+
+    # https://python-oracledb.readthedocs.io/en/latest/user_guide/initialization.html#setting-the-oracle-client-library-directory-on-windows
+    oracledb.init_oracle_client(lib_dir=r"C:\instantclient_21_9")
+    
     object_types = {
         'DATABASE LINK': 'DB_LINK',
         'FUNCTION': 'FUNCTION',
@@ -25,7 +29,7 @@ class DDLGenerator(object):
     # database function names
     grants_ddl_func = 'dbms_metadata.get_grant_ddl'
 
-    #-----------------------------------------
+    # -----------------------------------------
     def __init__(self, arg_obj):
 
         # argparse object
@@ -65,7 +69,7 @@ class DDLGenerator(object):
 
         self.dburl = self.validate_args(self.args)
 
-    #-----------------------------------------
+    # -----------------------------------------
     @staticmethod
     def write_ddl(obj_type, obj_name, schema, ddl_str, output_path):
         """
@@ -75,12 +79,12 @@ class DDLGenerator(object):
         if output_path is not None:
             # build the filename out of the schema name, object_type, object_name
             fname = "%s_%s_%s.sql" % (schema, obj_type, obj_name)
-            print "Writing file %s" % fname
+            print("Writing file %s" % fname)
             f = open(os.path.join(output_path, fname), 'w')
             f.write(str(ddl_str))
             f.close()
 
-    #-----------------------------------------
+    # -----------------------------------------
     def get_ddl(self, conn, schema_name):
         """
             Gets the DDL statements for the specified objects
@@ -90,24 +94,31 @@ class DDLGenerator(object):
         curs = conn.cursor()
         # go through the list of object types for which we're supposed to fetch ddl
         for obj_type in self.object_types_to_fetch:
-            #print obj_type, self.object_names[obj_type]
+            # print obj_type, self.object_names[obj_type]
             if 'ALL' in self.object_names[obj_type]:
                 # We're going to get all object of a certain type in the schema
                 # So get all object names for that object type. Skip any other names specified.
-                o_names = self.get_all_objects_of_type(conn, schema_name, obj_type)
+                o_names = self.get_all_objects_of_type(
+                    conn, schema_name, obj_type)
                 for o_name in o_names:
-                    print "Processing %s %s.%s" % (obj_type.lower(), schema_name, o_name)
-                    ddl_str = curs.callfunc(object_ddl_func, cx_Oracle.CLOB, (obj_type, o_name, schema_name))
-                    self.write_ddl(obj_type, o_name, schema_name, ddl_str, self.output_path)
+                    print("Processing %s %s.%s" %
+                          (obj_type.lower(), schema_name, o_name))
+                    ddl_str = curs.callfunc(
+                        object_ddl_func, oracledb.CLOB, (obj_type, o_name, schema_name))
+                    self.write_ddl(obj_type, o_name, schema_name,
+                                   ddl_str, self.output_path)
             else:
                 # Getting objects of a certain type having a name specified by the user
                 for obj_name in self.object_names[obj_type]:
-                    print "Processing %s %s.%s" % (obj_type.lower(), schema_name, obj_name)
-                    ddl_str = curs.callfunc(object_ddl_func, cx_Oracle.CLOB, (obj_type, obj_name, schema_name))
-                    self.write_ddl(obj_type, obj_name, schema_name, ddl_str, self.output_path)
+                    print("Processing %s %s.%s" %
+                          (obj_type.lower(), schema_name, obj_name))
+                    ddl_str = curs.callfunc(
+                        object_ddl_func, oracledb.CLOB, (obj_type, obj_name, schema_name))
+                    self.write_ddl(obj_type, obj_name, schema_name,
+                                   ddl_str, self.output_path)
         curs.close()
 
-    #-----------------------------------------
+    # -----------------------------------------
     def get_all_objects_of_type(self, conn, schema_name, obj_type):
         """
             Returns a list of names of all objects of a given type
@@ -130,7 +141,7 @@ class DDLGenerator(object):
         curs2.close()
         return names
 
-    #-----------------------------------------
+    # -----------------------------------------
     def validate_args(self, args):
         """
             Validates command line options
@@ -138,15 +149,16 @@ class DDLGenerator(object):
         if args.info:
             self.show_supported_objects()
             sys.exit(0)
-    
-        self.check_object_args(args, self.object_types_to_fetch, self.object_names)
+
+        self.check_object_args(
+            args, self.object_types_to_fetch, self.object_names)
 
         self.schema = args.dburl.split("/")[0]
 
         self.validate_file_option(args)
         return self.check_db_url(args)
 
-    #-----------------------------------------
+    # -----------------------------------------
     def objects_are_none(self, args_object):
         """
             determines if no db object arguments were supplied
@@ -168,76 +180,79 @@ class DDLGenerator(object):
             return True
         return False
 
-    #-----------------------------------------
+    # -----------------------------------------
     def set_object_types(self, args_object, object_types_to_fetch, object_names):
-                    # Collect the types and names of objects the user wants ddl for
-            if args_object.tables is not None:
-                object_names['TABLE'] = args_object.tables.upper().split(",")
-                object_types_to_fetch.append('TABLE')
-            if args_object.dblinks is not None:
-                object_names['DB_LINK'] = args_object.dblinks.upper().split(",")
-                object_types_to_fetch.append('DB_LINK')
-            if args_object.pkgs is not None:
-                object_names['PACKAGE'] = args_object.pkgs.upper().split(",")
-                object_types_to_fetch.append('PACKAGE')
-            if args_object.procs is not None:
-                object_names['PROCEDURE'] = args_object.procs.upper().split(",")
-                object_types_to_fetch.append('PROCEDURE')
-            if args_object.funcs is not None:
-                object_names['FUNCTION'] = args_object.funcs.upper().split(",")
-                object_types_to_fetch.append('FUNCTION')
-            if args_object.seqs is not None:
-                object_names['SEQUENCE'] = args_object.seqs.upper().split(",")
-                object_types_to_fetch.append('SEQUENCE')
-            if args_object.trigs is not None:
-                object_names['TRIGGER'] = args_object.trigs.upper().split(",")
-                object_types_to_fetch.append('TRIGGER')
-            if args_object.views is not None:
-                object_names['VIEW'] = args_object.views.upper().split(",")
-                object_types_to_fetch.append('VIEW')
-            if args_object.syns is not None:
-                object_names['SYNONYM'] = args_object.syns.upper().split(",")
-                object_types_to_fetch.append('SYNONYM')
-            if args_object.idxs is not None:
-                object_names['INDEX'] = args_object.idxs.upper().split(",")
-                object_types_to_fetch.append('INDEX')
+        # Collect the types and names of objects the user wants ddl for
+        if args_object.tables is not None:
+            object_names['TABLE'] = args_object.tables.upper().split(",")
+            object_types_to_fetch.append('TABLE')
+        if args_object.dblinks is not None:
+            object_names['DB_LINK'] = args_object.dblinks.upper().split(",")
+            object_types_to_fetch.append('DB_LINK')
+        if args_object.pkgs is not None:
+            object_names['PACKAGE'] = args_object.pkgs.upper().split(",")
+            object_types_to_fetch.append('PACKAGE')
+        if args_object.procs is not None:
+            object_names['PROCEDURE'] = args_object.procs.upper().split(",")
+            object_types_to_fetch.append('PROCEDURE')
+        if args_object.funcs is not None:
+            object_names['FUNCTION'] = args_object.funcs.upper().split(",")
+            object_types_to_fetch.append('FUNCTION')
+        if args_object.seqs is not None:
+            object_names['SEQUENCE'] = args_object.seqs.upper().split(",")
+            object_types_to_fetch.append('SEQUENCE')
+        if args_object.trigs is not None:
+            object_names['TRIGGER'] = args_object.trigs.upper().split(",")
+            object_types_to_fetch.append('TRIGGER')
+        if args_object.views is not None:
+            object_names['VIEW'] = args_object.views.upper().split(",")
+            object_types_to_fetch.append('VIEW')
+        if args_object.syns is not None:
+            object_names['SYNONYM'] = args_object.syns.upper().split(",")
+            object_types_to_fetch.append('SYNONYM')
+        if args_object.idxs is not None:
+            object_names['INDEX'] = args_object.idxs.upper().split(",")
+            object_types_to_fetch.append('INDEX')
 
-    #-----------------------------------------
+    # -----------------------------------------
     def check_object_args(self, args_object, object_types_to_fetch, object_names):
         """
             checks to see if db object args have been supplied and stores any that have been
         """
-        print "check_object_args(): Start"
+        print("check_object_args(): Start")
         if self.objects_are_none(args_object):
             raise ValueError("No database object types specified")
         else:
-            self.set_object_types(args_object, object_types_to_fetch, object_names)
+            self.set_object_types(
+                args_object, object_types_to_fetch, object_names)
 
-        print "Getting database objects that are %s" % ",".join(object_types_to_fetch)
+        print("Getting database objects that are %s" %
+              ",".join(object_types_to_fetch))
 
-    #-----------------------------------------
+    # -----------------------------------------
     def validate_file_option(self, args):
         """
             Validate the destination where ddl files will be put
         """
         # see if user wants us to generate a file for each object
         if not os.path.exists(args.output_path):
-            raise ddlexceptions.DirNoExistError("Invalid path: %s" % args.output_path)
+            raise ddlexceptions.DirNoExistError(
+                "Invalid path: %s" % args.output_path)
 
         self.output_path = args.output_path
 
-        print "ddl output destination set to %s" % self.output_path
+        print("ddl output destination set to %s" % self.output_path)
 
-    #-----------------------------------------
+    # -----------------------------------------
     def show_supported_objects(self):
         """
             show the user the list objects we can return ddl statements for
         """
-        print 'The program can generate DDL for the following object types:'
+        print('The program can generate DDL for the following object types:')
         for obj_type in self.allowed_object_types:
-            print "\t%s" % obj_type
+            print("\t%s" % obj_type)
 
-    #-----------------------------------------
+    # -----------------------------------------
     def check_db_url(self, args_object):
         """
             check the dburl supplied on the command line
@@ -255,44 +270,56 @@ class DDLGenerator(object):
         self.test_db_connection(args_object.dburl)
         return args_object.dburl
 
-    #-----------------------------------------
+    # -----------------------------------------
     def test_db_connection(self, url):
         """
             tries to get a connection to the database.  Kicks an error if it can't
         """
         try:
-            conn = cx_Oracle.connect(url)
-        except cx_Oracle.DatabaseError as dbe:
+            conn = oracledb.connect(url)
+        except oracledb.DatabaseError as dbe:
             err, = dbe.args
 
             if err.code == 12154:  # bad db alias
-                raise ddlexceptions.BadDbAliasError("Invalid TNS alias. check your tnsnames.ora")
+                raise ddlexceptions.BadDbAliasError(
+                    "Invalid TNS alias. check your tnsnames.ora")
             elif err.code == 1017:  # bad username/password
-                raise ddlexceptions.BadDbUserCredsError("Invalid Username or Password")
+                raise ddlexceptions.BadDbUserCredsError(
+                    "Invalid Username or Password")
             else:
                 raise
         else:
             self.conn = conn
 
 
-#-----------------------------------------
+# -----------------------------------------
 #!!!!!! Not part of the above class !!!!!!
 def get_command_line_args():
     """
         get all the command line options into a single variable
     """
-    parser = argparse.ArgumentParser(description="A Program to get Oracle database DDL")
-    parser.add_argument('--tables', type=str, help="table name | TABLE1,..,TABLEn")
-    parser.add_argument('--dblinks', type=str, help="dblink name | DBL1,...,DBLn")
-    parser.add_argument('--pkgs', type=str, help='package name | PKG1,...,PKGn')
-    parser.add_argument('--procs', type=str, help='procedure name | PROC1,...,PROCn')
-    parser.add_argument('--funcs', type=str, help="func name | FUNC1,...,FUNCn")
-    parser.add_argument('--seqs', type=str, help="sequence name | SEQ1,...,SEQn")
-    parser.add_argument('--trigs', type=str, help="trigger name | TRG1,...,TRGn")
+    parser = argparse.ArgumentParser(
+        description="A Program to get Oracle database DDL")
+    parser.add_argument('--tables', type=str,
+                        help="table name | TABLE1,..,TABLEn")
+    parser.add_argument('--dblinks', type=str,
+                        help="dblink name | DBL1,...,DBLn")
+    parser.add_argument('--pkgs', type=str,
+                        help='package name | PKG1,...,PKGn')
+    parser.add_argument('--procs', type=str,
+                        help='procedure name | PROC1,...,PROCn')
+    parser.add_argument('--funcs', type=str,
+                        help="func name | FUNC1,...,FUNCn")
+    parser.add_argument('--seqs', type=str,
+                        help="sequence name | SEQ1,...,SEQn")
+    parser.add_argument('--trigs', type=str,
+                        help="trigger name | TRG1,...,TRGn")
     parser.add_argument('--views', type=str, help="view name | VW1,...,VWn")
-    parser.add_argument('--syns', type=str, help="synonym name | SYN1,...,SYNn")
+    parser.add_argument('--syns', type=str,
+                        help="synonym name | SYN1,...,SYNn")
     parser.add_argument('--idxs', type=str, help="index name | IX1,...,IXn")
-    parser.add_argument('--info', action='store_true', help="Show a list of supported objects and exit")
+    parser.add_argument('--info', action='store_true',
+                        help="Show a list of supported objects and exit")
 
     # this option reeeeeaaaally changes behavior and creates some tedious branching
     # parser.add_argument('--schema', type=str, help="schema containing the objects of interest")
@@ -309,7 +336,7 @@ def get_command_line_args():
     return args
 
 
-#-----------------------------------------
+# -----------------------------------------
 def main():
 
     ddlg = DDLGenerator(get_command_line_args())
@@ -317,6 +344,6 @@ def main():
     return 0
 
 
-#-----------------------------------------
+# -----------------------------------------
 if __name__ == "__main__":
     sys.exit(main())
