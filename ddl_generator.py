@@ -71,17 +71,35 @@ class DDLGenerator(object):
 
     # -----------------------------------------
     @staticmethod
-    def write_ddl(obj_type, obj_name, schema, ddl_str, output_path):
+    def write_ddl(obj_type, obj_name, schema, ddl_str, grants_str, output_path):
         """
             Writes out the ddl string to a file
         """
+
+        def add_delimiter_by_type(type: str) -> str:
+            match type.lower():
+                case 'view':
+                    return ";"
+                case _:
+                    return ""
+            
+        def mod_str(type: str, ddl: str) -> str:
+            match type.lower():
+                case 'package':
+                    # replace 'END {obj_name};' with 'END {obj_name};\'
+                    return str(ddl).replace(f"end {obj_name};", f"end {obj_name};\n\\")
+                case _:
+                    return ddl
 
         if output_path is not None:
             # build the filename out of the schema name, object_type, object_name
             fname = "%s_%s_%s.sql" % (schema, obj_type, obj_name)
             print("Writing file %s" % fname)
             f = open(os.path.join(output_path, fname), 'w')
-            f.write(str(ddl_str))
+            f.write(str(mod_str(obj_type, ddl_str)))
+            f.write(add_delimiter_by_type(obj_type))
+            f.write(str(grants_str)) # Adds grants
+            # If package or package body
             f.close()
 
     # -----------------------------------------
@@ -91,6 +109,8 @@ class DDLGenerator(object):
         """
 
         object_ddl_func = 'dbms_metadata.get_ddl'
+        object_dependent_ddl_func = 'dbms_metadata.get_dependent_ddl'
+        # 'DBMS_METADATA.GET_DEPENDENT_DDL('OBJECT_GRANT','HUAWF2530_V','SEPHU')'
         curs = conn.cursor()
         # go through the list of object types for which we're supposed to fetch ddl
         for obj_type in self.object_types_to_fetch:
@@ -114,8 +134,10 @@ class DDLGenerator(object):
                           (obj_type.lower(), schema_name, obj_name))
                     ddl_str = curs.callfunc(
                         object_ddl_func, oracledb.CLOB, (obj_type, obj_name, schema_name))
+                    grants_str = curs.callfunc(
+                        object_dependent_ddl_func, oracledb.CLOB, ('OBJECT_GRANT', obj_name, schema_name))
                     self.write_ddl(obj_type, obj_name, schema_name,
-                                   ddl_str, self.output_path)
+                                   ddl_str, grants_str, self.output_path)
         curs.close()
 
     # -----------------------------------------
